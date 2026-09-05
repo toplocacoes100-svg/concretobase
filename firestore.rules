@@ -1,0 +1,75 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function estaLogado() {
+      return request.auth != null;
+    }
+
+    function meuPerfil() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.role;
+    }
+
+    function souAdmin() {
+      return estaLogado() && meuPerfil() == 'admin';
+    }
+
+    function temPerfil(p) {
+      return estaLogado() && (meuPerfil() == p || souAdmin());
+    }
+
+    // Cadastro de usuários e seus perfis (role)
+    match /usuarios/{uid} {
+      allow read: if estaLogado() && (request.auth.uid == uid || souAdmin());
+      // Um usuário novo só pode criar o próprio documento, e sempre como "pendente".
+      // Só o admin pode mudar o perfil dele depois (pelo Console do Firebase).
+      allow create: if estaLogado() && request.auth.uid == uid && request.resource.data.role == 'pendente';
+      allow update: if souAdmin();
+    }
+
+    // Contadores usados para gerar números tipo PV-1043, PC-330 etc.
+    match /contadores/{id} {
+      allow read, write: if estaLogado();
+    }
+
+    match /vendas/{id} {
+      allow read: if temPerfil('vendas') || temPerfil('logistica');
+      allow create, update, delete: if temPerfil('vendas');
+    }
+
+    match /compras/{id} {
+      allow read, create, update, delete: if temPerfil('compras');
+    }
+
+    match /fornecedores/{id} {
+      allow read, create, update, delete: if temPerfil('compras');
+    }
+
+    match /estoque/{id} {
+      allow read: if temPerfil('compras') || temPerfil('logistica');
+      allow create, update, delete: if temPerfil('compras');
+    }
+
+    match /frota/{id} {
+      allow read, create, update, delete: if temPerfil('logistica');
+    }
+
+    match /notas/{id} {
+      allow read: if temPerfil('vendas') || temPerfil('logistica');
+      allow create, update, delete: if temPerfil('vendas');
+    }
+
+    match /financeiro_receber/{id} {
+      allow read, create, update, delete: if temPerfil('financeiro');
+    }
+
+    match /financeiro_pagar/{id} {
+      allow read, create, update, delete: if temPerfil('financeiro');
+    }
+
+    match /funcionarios/{id} {
+      allow read, create, update, delete: if temPerfil('rh');
+    }
+  }
+}
