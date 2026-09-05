@@ -134,6 +134,7 @@
       <div class="nav-item active" data-section="dashboard"><span class="dot"></span>Painel</div>
       <div class="nav-item" data-section="compras" data-perfil="compras"><span class="dot"></span>Compras</div>
       <div class="nav-item" data-section="vendas" data-perfil="vendas"><span class="dot"></span>Vendas</div>
+      <div class="nav-item" data-section="clientes" data-perfil="vendas"><span class="dot"></span>Clientes</div>
       <div class="nav-item" data-section="logistica" data-perfil="logistica"><span class="dot"></span>Logística</div>
       <div class="nav-item" data-section="programacao" data-perfil="logistica"><span class="dot"></span>Programação</div>
       <div class="nav-item" data-section="notas" data-perfil="vendas"><span class="dot"></span>Notas</div>
@@ -198,13 +199,34 @@
         <div class="panel">
           <div class="panel-head"><h3>Novo pedido de venda</h3></div>
           <form class="inline-form" id="formVenda">
-            <div class="field"><label>Cliente</label><input type="text" id="vCliente" required></div>
+            <div class="field"><label>Cliente</label><input type="text" id="vCliente" list="listaClientesDatalist" required></div>
+            <datalist id="listaClientesDatalist"></datalist>
             <div class="field"><label>Traço (fck)</label><select id="vTraco"><option>fck 20 MPa</option><option>fck 25 MPa</option><option>fck 30 MPa</option><option>fck 35 MPa</option></select></div>
             <div class="field"><label>Volume (m³)</label><input type="number" id="vVolume" style="width:90px" required></div>
             <div class="field"><label>Entrega</label><input type="date" id="vData"></div>
             <button class="btn" type="submit">Lançar pedido</button>
           </form>
+          <div class="inline-form" style="border-bottom:none;">
+            <div class="field"><label>🔍 Buscar</label><input type="text" id="vendaBusca" placeholder="Pedido ou cliente..." style="width:220px"></div>
+            <div class="field"><label>&nbsp;</label><button class="btn secondary" type="button" id="vendaOrdenar" style="padding:8px 14px;">Ordenar A-Z por cliente</button></div>
+          </div>
           <table id="tabelaVendas"></table>
+        </div>
+      </section>
+
+      <section class="section" id="sec-clientes">
+        <div class="panel">
+          <div class="panel-head"><h3>Novo cliente</h3></div>
+          <form class="inline-form" id="formCliente">
+            <div class="field"><label>Nome / Razão social</label><input type="text" id="ctNome" required></div>
+            <div class="field"><label>Telefone</label><input type="text" id="ctTelefone" placeholder="(00) 00000-0000"></div>
+            <div class="field"><label>Obra / Endereço</label><input type="text" id="ctEndereco" style="width:220px"></div>
+            <button class="btn" type="submit">Cadastrar cliente</button>
+          </form>
+          <div class="inline-form" style="border-bottom:none;">
+            <div class="field"><label>🔍 Buscar cliente</label><input type="text" id="clienteBusca" placeholder="Nome..." style="width:220px"></div>
+          </div>
+          <table id="tabelaClientes"></table>
         </div>
       </section>
 
@@ -230,7 +252,16 @@
       </section>
 
       <section class="section" id="sec-notas">
-        <div class="panel"><div class="panel-head"><h3>Notas fiscais e de transporte</h3></div><table id="tabelaNotas"></table></div>
+        <div class="panel">
+          <div class="panel-head"><h3>Lançar nova nota</h3></div>
+          <form class="inline-form" id="formNota">
+            <div class="field"><label>Tipo</label><select id="nTipo"><option>Venda</option><option>Transporte</option></select></div>
+            <div class="field"><label>Pedido vinculado</label><input type="text" id="nPedido" placeholder="ex: PV-1042" required></div>
+            <div class="field"><label>Cliente</label><input type="text" id="nCliente" required></div>
+            <button class="btn" type="submit">Lançar nota</button>
+          </form>
+          <table id="tabelaNotas"></table>
+        </div>
       </section>
 
       <section class="section" id="sec-financeiro">
@@ -264,7 +295,7 @@
     getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut
   } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
   import {
-    getFirestore, collection, getDocs, addDoc, doc, getDoc, setDoc, query, orderBy
+    getFirestore, collection, getDocs, addDoc, doc, getDoc, setDoc, updateDoc, deleteDoc, query, orderBy
   } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
   // ⚠️ Troque pelos dados do SEU projeto Firebase (Configurações do projeto → Config do SDK)
@@ -285,7 +316,7 @@
 
   const titles = {
     dashboard: ["Visão geral", "Painel do dia"], compras: ["Suprimentos", "Compras"],
-    vendas: ["Comercial", "Vendas"], logistica: ["Expedição", "Logística"],
+    vendas: ["Comercial", "Vendas"], clientes: ["Comercial", "Clientes"], logistica: ["Expedição", "Logística"],
     programacao: ["Planejamento", "Programação do dia"], notas: ["Documentos fiscais", "Notas"],
     financeiro: ["Caixa e contas", "Financeiro"], funcionarios: ["Equipe", "Funcionários"]
   };
@@ -407,14 +438,71 @@
     } catch { document.getElementById("sec-compras").innerHTML = `<div class="sem-acesso">Seu perfil não tem acesso a Compras.</div>`; }
   }
 
+  let vendasCache = [];
+  let vendasOrdenadoAZ = false;
+
+  function renderizarTabelaVendas(){
+    const termo = (document.getElementById("vendaBusca")?.value || "").toLowerCase();
+    let lista = vendasCache.filter(v =>
+      (v.numero||v.id||"").toLowerCase().includes(termo) || (v.cliente||"").toLowerCase().includes(termo)
+    );
+    if (vendasOrdenadoAZ) {
+      lista = [...lista].sort((a,b) => (a.cliente||"").localeCompare(b.cliente||"", "pt-BR"));
+    }
+    let linhas = `<tr><th>Pedido</th><th>Cliente</th><th>Traço</th><th>Volume</th><th>Entrega</th><th>Status</th></tr>`;
+    lista.forEach(v => linhas += `<tr><td class="mono">${v.numero||v.id}</td><td>${v.cliente}</td><td>${v.traco}</td><td>${v.volume} m³</td><td>${fmtData(v.entrega)}</td><td>${badge(v.status)}</td></tr>`);
+    document.getElementById("tabelaVendas").innerHTML = lista.length ? linhas : `<tr><td class="empty-note">Nenhum pedido encontrado.</td></tr>`;
+  }
+
   async function carregarVendas(){
     try {
-      const vendas = await listar("vendas");
-      let linhas = `<tr><th>Pedido</th><th>Cliente</th><th>Traço</th><th>Volume</th><th>Entrega</th><th>Status</th></tr>`;
-      vendas.forEach(v => linhas += `<tr><td class="mono">${v.numero||v.id}</td><td>${v.cliente}</td><td>${v.traco}</td><td>${v.volume} m³</td><td>${fmtData(v.entrega)}</td><td>${badge(v.status)}</td></tr>`);
-      document.getElementById("tabelaVendas").innerHTML = linhas;
+      vendasCache = await listar("vendas");
+      renderizarTabelaVendas();
     } catch { document.getElementById("sec-vendas").innerHTML = `<div class="sem-acesso">Seu perfil não tem acesso a Vendas.</div>`; }
   }
+
+  document.getElementById("vendaBusca").addEventListener("input", renderizarTabelaVendas);
+  document.getElementById("vendaOrdenar").addEventListener("click", () => {
+    vendasOrdenadoAZ = !vendasOrdenadoAZ;
+    document.getElementById("vendaOrdenar").textContent = vendasOrdenadoAZ ? "Voltar ao mais recente" : "Ordenar A-Z por cliente";
+    renderizarTabelaVendas();
+  });
+
+  // ---------- CLIENTES ----------
+  let clientesCache = [];
+
+  function renderizarTabelaClientes(){
+    const termo = (document.getElementById("clienteBusca")?.value || "").toLowerCase();
+    const lista = clientesCache
+      .filter(c => (c.nome||"").toLowerCase().includes(termo))
+      .sort((a,b) => (a.nome||"").localeCompare(b.nome||"", "pt-BR"));
+    let linhas = `<tr><th>Nome</th><th>Telefone</th><th>Obra / Endereço</th></tr>`;
+    lista.forEach(c => linhas += `<tr><td>${c.nome}</td><td>${c.telefone||"—"}</td><td>${c.endereco||"—"}</td></tr>`);
+    document.getElementById("tabelaClientes").innerHTML = lista.length ? linhas : `<tr><td class="empty-note">Nenhum cliente cadastrado ainda.</td></tr>`;
+    document.getElementById("listaClientesDatalist").innerHTML = clientesCache
+      .sort((a,b) => (a.nome||"").localeCompare(b.nome||"", "pt-BR"))
+      .map(c => `<option value="${c.nome}">`).join("");
+  }
+
+  async function carregarClientes(){
+    try {
+      clientesCache = await listar("clientes");
+      renderizarTabelaClientes();
+    } catch { document.getElementById("sec-clientes").innerHTML = `<div class="sem-acesso">Seu perfil não tem acesso a Clientes.</div>`; }
+  }
+
+  document.getElementById("clienteBusca").addEventListener("input", renderizarTabelaClientes);
+
+  document.getElementById("formCliente").addEventListener("submit", async e => {
+    e.preventDefault();
+    await addDoc(collection(db, "clientes"), {
+      nome: document.getElementById("ctNome").value,
+      telefone: document.getElementById("ctTelefone").value,
+      endereco: document.getElementById("ctEndereco").value
+    });
+    e.target.reset();
+    carregarClientes();
+  });
 
   async function carregarLogistica(){
     try {
@@ -424,14 +512,66 @@
     } catch { document.getElementById("sec-logistica").innerHTML = `<div class="sem-acesso">Seu perfil não tem acesso a Logística.</div>`; }
   }
 
+  // Carrega os nomes de clientes cadastrados assim que a página abre, para o autocompletar do pedido de venda
+  listar("clientes").then(c => { clientesCache = c; renderizarTabelaClientes(); }).catch(() => {});
+
+  // Sequência de status de uma nota, usada pelo botão "Dar baixa" (avança uma etapa)
+  const SEQUENCIA_STATUS_NOTA = {
+    "Emitida": "Aguardando canhoto",
+    "Aguardando canhoto": "Canhoto assinado",
+    "Canhoto assinado": "Canhoto assinado" // já é o status final, botão some
+  };
+
   async function carregarNotas(){
     try {
       const notas = await listar("notas");
-      let linhas = `<tr><th>Nota</th><th>Tipo</th><th>Pedido vinculado</th><th>Cliente</th><th>Status</th></tr>`;
-      notas.forEach(n => linhas += `<tr><td class="mono">${n.numero||n.id}</td><td>${n.tipo}</td><td>${n.pedido}</td><td>${n.cliente}</td><td>${badge(n.status)}</td></tr>`);
-      document.getElementById("tabelaNotas").innerHTML = linhas;
+      let linhas = `<tr><th>Nota</th><th>Tipo</th><th>Pedido vinculado</th><th>Cliente</th><th>Status</th><th>Ações</th></tr>`;
+      notas.forEach(n => {
+        const proximo = SEQUENCIA_STATUS_NOTA[n.status];
+        const podeAvancar = proximo && proximo !== n.status;
+        const botaoBaixa = podeAvancar
+          ? `<button class="btn secondary btn-baixa-nota" data-id="${n.id}" data-proximo="${proximo}" style="padding:4px 8px;font-size:11px;">Dar baixa</button>`
+          : "";
+        linhas += `<tr>
+          <td class="mono">${n.numero||n.id}</td><td>${n.tipo}</td><td>${n.pedido}</td><td>${n.cliente}</td><td>${badge(n.status)}</td>
+          <td style="white-space:nowrap;">${botaoBaixa}
+            <button class="btn secondary btn-excluir-nota" data-id="${n.id}" style="padding:4px 8px;font-size:11px;margin-left:6px;">Excluir</button>
+          </td>
+        </tr>`;
+      });
+      document.getElementById("tabelaNotas").innerHTML = notas.length ? linhas : `<tr><td class="empty-note">Nenhuma nota lançada ainda.</td></tr>`;
+
+      document.querySelectorAll(".btn-baixa-nota").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          await updateDoc(doc(db, "notas", btn.dataset.id), { status: btn.dataset.proximo });
+          carregarNotas();
+        });
+      });
+      document.querySelectorAll(".btn-excluir-nota").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("Excluir esta nota? Essa ação não pode ser desfeita.")) return;
+          await deleteDoc(doc(db, "notas", btn.dataset.id));
+          carregarNotas();
+        });
+      });
     } catch { document.getElementById("sec-notas").innerHTML = `<div class="sem-acesso">Seu perfil não tem acesso a Notas.</div>`; }
   }
+
+  document.getElementById("formNota").addEventListener("submit", async e => {
+    e.preventDefault();
+    const tipo = document.getElementById("nTipo").value;
+    const prefixo = tipo === "Venda" ? "NF" : "NT";
+    const chaveContador = tipo === "Venda" ? "notas_nf" : "notas_nt";
+    const numero = await proximoNumero(chaveContador, prefixo);
+    await addDoc(collection(db, "notas"), {
+      numero, tipo,
+      pedido: document.getElementById("nPedido").value,
+      cliente: document.getElementById("nCliente").value,
+      status: "Emitida"
+    });
+    e.target.reset();
+    carregarNotas();
+  });
 
   async function carregarFinanceiro(){
     try {
@@ -455,7 +595,7 @@
   }
 
   const carregadores = {
-    dashboard: carregarDashboard, compras: carregarCompras, vendas: carregarVendas,
+    dashboard: carregarDashboard, compras: carregarCompras, vendas: carregarVendas, clientes: carregarClientes,
     logistica: carregarLogistica, notas: carregarNotas, financeiro: carregarFinanceiro,
     funcionarios: carregarFuncionarios, programacao: () => {}
   };
