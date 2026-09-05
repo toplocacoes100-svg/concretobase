@@ -68,6 +68,10 @@ service cloud.firestore {
       allow read, create, update, delete: if temPerfil('financeiro');
     }
 
+    match /clientes/{id} {
+      allow read, create, update, delete: if temPerfil('vendas');
+    }
+
     match /funcionarios/{id} {
       allow read, create, update, delete: if temPerfil('rh');
     }
